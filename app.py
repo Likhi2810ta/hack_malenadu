@@ -24,6 +24,25 @@ BUFFER_SIZE = 120
 Z_DEFAULT_THRESHOLD = 3.0
 ALERT_COOLDOWN_SEC = 60
 RISK_ALERT_THRESHOLD = 65.0
+
+# Per-machine initial Z-score thresholds (tuned from baseline analysis)
+# Lower = more sensitive; higher = fewer FPs at cost of some recall
+_INITIAL_Z_THRESHOLD = {
+    "CNC_01":      2.7,   # lower — CNC_01 rarely faults, need early detection
+    "CNC_02":      2.8,   # slightly sensitive — faults frequently
+    "PUMP_03":     2.5,   # most sensitive — 736 FNs to recover
+    "CONVEYOR_04": 3.3,   # higher guard — belt dynamics inflate Z on normal ops
+}
+
+# Minimum consecutive above-threshold readings before alert fires
+# Key FP reduction: CNC_02 had 1172 FPs and CONVEYOR_04 had 848 FPs
+# Requiring N consecutive readings ≈ FPs × (FP_rate)^(N-1) reduction
+_MIN_BREACH_FOR_ALERT = {
+    "CNC_01":      1,
+    "CNC_02":      1,   # Normal max<84%; clean boundary at 84% threshold
+    "CONVEYOR_04": 3,   # Sustained gate reduces FPs for noisy conveyor signal
+    "PUMP_03":     1,   # Threshold=60%>normal_max(59%); breach=1 catches first-tick faults
+}
 RISK_MAINTENANCE_THRESHOLD = 85.0
 
 # Maintenance scheduling — breach-count rules
@@ -36,11 +55,16 @@ MAINTENANCE_RULES = [
 ]
 MAINTENANCE_COOLDOWN_SEC = 300   # don't re-book same machine within 5 min
 
-# Per-machine overrides — raised where historical FP rate is high, lowered where recall is low
+# Per-machine overrides — tuned from live evaluation (2026-04-18)
+# CNC_01:      55  — rarely faults; threshold below max observed normal risk (52.1%)
+# CNC_02:      84  — optimal by sweep: F1=88.4% at 84% vs 80.6% at 78% (too many FPs)
+# CONVEYOR_04: 93  — FPs at 93-99%, breach_count=3 gate eliminates them
+# PUMP_03:     60  — normal max=59%, threshold=60% gives 0 FPs; breach=1 catches first-ticks
 _RISK_ALERT_THRESHOLD_OVERRIDE = {
-    "CONVEYOR_04": 83.0,  # raised from 75.0 — FPR still 20% at 75
-    "CNC_02":      76.0,  # FP mean risk was 75.7 — cuts most FPs; recall already 100%
-    "PUMP_03":     58.0,  # lowered from default 65 — recovers 445 missed faults
+    "CNC_01":      55.0,
+    "CNC_02":      84.0,
+    "CONVEYOR_04": 93.0,
+    "PUMP_03":     60.0,
 }
 
 def _alert_threshold(machine_id: str) -> float:
@@ -74,7 +98,7 @@ def _state_init():
             "buffers":            {mid: deque(maxlen=BUFFER_SIZE) for mid in MACHINE_IDS},
             "connection_status":  {mid: "Connecting" for mid in MACHINE_IDS},
             "last_data_time":     {mid: 0.0 for mid in MACHINE_IDS},
-            "learned_thresholds": {mid: Z_DEFAULT_THRESHOLD for mid in MACHINE_IDS},
+            "learned_thresholds": {mid: _INITIAL_Z_THRESHOLD.get(mid, Z_DEFAULT_THRESHOLD) for mid in MACHINE_IDS},
             "alert_log":          [],
             "unconfirmed_alerts": {mid: None for mid in MACHINE_IDS},
             "last_alert_time":        {mid: 0.0 for mid in MACHINE_IDS},
@@ -285,16 +309,19 @@ _MAX_SLOPE = {
     "current_A":      0.1,
 }
 # Per-machine slope overrides — loosen where natural variance exceeds global defaults
+# CONVEYOR_04 raised further: its normal belt dynamics produce high polyfit severity,
+# contributing to the 848 FPs; loosening reduces trend_penalty on healthy rows
 _MAX_SLOPE_OVERRIDE: dict[str, dict] = {
     "CONVEYOR_04": {
-        "vibration_mm_s": 0.12,  # was 0.05 — too tight for conveyor belt dynamics
-        "rpm":            4.0,   # was 2.0
-        "current_A":      0.2,   # was 0.1
+        "temperature_C":  0.8,   # was 0.5
+        "vibration_mm_s": 0.22,  # was 0.12 — belt dynamics trigger false polyfit spikes
+        "rpm":            6.0,   # was 4.0
+        "current_A":      0.35,  # was 0.2
     },
     "CNC_02": {
         "temperature_C":  0.8,   # was 0.5 — CNC temperature drifts more
-        "vibration_mm_s": 0.08,  # was 0.05 — polyfit score 91.7 on FP rows
-        "current_A":      0.15,  # was 0.1
+        "vibration_mm_s": 0.10,  # was 0.08 — further loosen; polyfit score 90.9 on FP rows
+        "current_A":      0.18,  # was 0.15
     },
 }
 
@@ -337,13 +364,14 @@ def compute_risk(machine_id, features, if_anomaly, etf_dict):
     # Normalise to [-1, +1] range before sigmoid so score only clears
     # 70% when z genuinely exceeds the threshold, not on marginal readings.
     base_score = (max_z - threshold) / max(threshold, 1e-6)
-    # Require z corroboration before applying IF penalty; CONVEYOR_04 needs z≥3.0
-    # (matching stat threshold) because its IF model fires on normal readings even
-    # at contamination=0.003.
-    _if_min_z_map = {"CONVEYOR_04": 3.0}
+    # IF corroboration gates — require minimum z before IF penalty applies
+    # CONVEYOR_04: raised to 5.0 (was 3.0) — IF fires on normal readings, needs strong Z
+    # CNC_02:      raised to 3.5 (was 2.0) — 30% FPR driven partly by spurious IF flags
+    # Others in override dict: 2.5; CNC_01 (no override): 0 (allow IF to fire freely)
+    _if_min_z_map = {"CONVEYOR_04": 5.0, "CNC_02": 3.5, "PUMP_03": 2.0}
     _if_min_z = _if_min_z_map.get(
         machine_id,
-        2.0 if machine_id in _RISK_ALERT_THRESHOLD_OVERRIDE else 0.0,
+        2.5 if machine_id in _RISK_ALERT_THRESHOLD_OVERRIDE else 0.0,
     )
     isolation_penalty = 0.3 if (if_anomaly and max_z >= _if_min_z) else 0.0
     # CHANGED: Layer 5 — proportional trend_penalty using polyfit_score
@@ -482,11 +510,12 @@ _PRED_HEADER = ["timestamp", "machine_id", "server_status", "actual_fault",
                 "if_anomaly", "polyfit_score"]
 _PRED_HEADER_WRITTEN = False
 
-def _log_prediction(machine_id, latest, risk_pct, if_anomaly, polyfit_score):
+def _log_prediction(machine_id, latest, risk_pct, if_anomaly, polyfit_score, breach_count=0):
     global _PRED_HEADER_WRITTEN
     server_status   = str(latest.get("status", "running")).lower()
     actual_fault    = 1 if server_status in ("warning", "fault") else 0
-    predicted_fault = 1 if risk_pct >= _alert_threshold(machine_id) else 0
+    min_breach      = _MIN_BREACH_FOR_ALERT.get(machine_id, 1)
+    predicted_fault = 1 if (risk_pct >= _alert_threshold(machine_id) and breach_count >= min_breach) else 0
     our_label       = ("HIGH" if risk_pct >= 70 else
                        "MODERATE" if risk_pct >= 40 else "STABLE")
     row = [
@@ -537,10 +566,6 @@ def run_agent_loop():
         _STATE[f"etf_{machine_id}"]        = etf_dict
         _STATE[f"if_anomaly_{machine_id}"] = if_anomaly
 
-        # ADDED: prediction logger — write one row per machine per tick
-        _log_prediction(machine_id, features["latest"], risk_pct,
-                        if_anomaly, pf_result["score"])
-
         now        = time.time()
         last_alert = _STATE["last_alert_time"].get(machine_id, 0.0)
         cooldown_ok = (now - last_alert) >= ALERT_COOLDOWN_SEC
@@ -553,6 +578,11 @@ def run_agent_loop():
         else:
             _STATE["breach_counts"][machine_id] = 0
         prediction_count = _STATE["breach_counts"][machine_id]
+
+        # ADDED: prediction logger — write one row per machine per tick
+        # Uses breach_count so predicted_fault reflects the gate (not raw threshold)
+        _log_prediction(machine_id, features["latest"], risk_pct,
+                        if_anomaly, pf_result["score"], breach_count=prediction_count)
 
         # ── Maintenance scheduler (runs every tick, not gated by cooldown) ───
         maintenance_due   = False
@@ -608,7 +638,8 @@ def run_agent_loop():
                     f"Maintenance POST failed ({machine_id}): {e}"
                 )
 
-        if risk_pct >= _alert_threshold(machine_id) and cooldown_ok:
+        min_breach = _MIN_BREACH_FOR_ALERT.get(machine_id, 1)
+        if risk_pct >= _alert_threshold(machine_id) and cooldown_ok and prediction_count >= min_breach:
             part1, part2, fault_type = _generate_explanation(
                 machine_id, features, if_anomaly, etf_dict, risk_pct
             )
@@ -663,8 +694,13 @@ def _on_confirm(machine_id):
         alert["outcome"] = "Confirmed"
         _STATE["alert_log"].append(dict(alert))
         _STATE["unconfirmed_alerts"][machine_id] = None
+        # Lower Z threshold slightly — confirmed true positive means we can be
+        # more aggressive; floor at 2.0 to prevent over-sensitisation
+        old = _STATE["learned_thresholds"].get(machine_id, Z_DEFAULT_THRESHOLD)
+        new = round(max(2.0, old - 0.1), 2)
+        _STATE["learned_thresholds"][machine_id] = new
         _STATE["log_messages"].append(
-            f"[{machine_id}] Fault confirmed by operator."
+            f"[{machine_id}] Fault confirmed — threshold tightened {old}σ → {new}σ"
         )
 
 
@@ -675,10 +711,10 @@ def _on_false_positive(machine_id):
         _STATE["alert_log"].append(dict(alert))
         _STATE["unconfirmed_alerts"][machine_id] = None
         old = _STATE["learned_thresholds"].get(machine_id, Z_DEFAULT_THRESHOLD)
-        new = round(old + 0.25, 2)
+        new = round(min(old + 0.15, 5.0), 2)   # cap at 5.0 — never go fully blind
         _STATE["learned_thresholds"][machine_id] = new
         _STATE["log_messages"].append(
-            f"Threshold for {machine_id} adjusted to {new}"
+            f"[{machine_id}] False positive — threshold relaxed {old}σ → {new}σ"
         )
 
 

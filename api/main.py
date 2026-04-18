@@ -28,25 +28,29 @@ BUFFER_SIZE = 120
 # ── Machine display config (names + images from Stitch design) ─────────────────
 MACHINE_META = {
     "CNC_01": {
-        "display_name": "Precision CNC Mill",
+        "display_name": "CNC_01",
+        "subtitle":     "Precision CNC Mill",
         "asset_id":     "M01",
         "location":     "Bay A-1",
         "image":        "https://lh3.googleusercontent.com/aida-public/AB6AXuCFtqDTDGO5SlTlTyuOyKQm3dZNWHxH5sw8hfgqGXObZfjX7PmpiSdFp4N99e5-dQObUw9JsSMuSCdhz1N5rpFLE8EobQ3aq8XXHT0TgJkPbq618LcTLbl996P2V8kCtVAJhUmVtVDuMarWDRxrWnHlLjm77RSuhOxRT4XYezACDK14wLUo7XuMYn4TDNzzSNH8vUMklre2s669pcbuaI2TrTyZdoSHuDFPxyFnTCK2z8t0i164F5TZ2Qbvb9UoVon7LoSCJzeTBw3P",
     },
     "CNC_02": {
-        "display_name": "Kinetic Robotic Arm",
+        "display_name": "CNC_02",
+        "subtitle":     "Kinetic Robotic Arm",
         "asset_id":     "M02",
         "location":     "Bay A-2",
         "image":        "https://lh3.googleusercontent.com/aida-public/AB6AXuBb1iOziMFbpqfi_wa1PRRNQbCj38zOmxNsviAi1p_wFTpz8DJOtIpvDny4Pr6pExGFOpVLXDLynem05wQp9ilYgbpDEqo9Y0P6P030xrDwOgYhbA_lq2sIVn3YqKBxoO87rhBbKXqqWSCcJw1qqkNj9M78lxZhISjj8PuvnKoKI1pn3Tlkl9k-a-X9IKcbZaeCW8peX4jnT5rWblChb0SwXUGbz3eyQUvoeWJgQI8M-puX2eK8hdOCiTIOBU4jotpxTSmSVr_qbBnY",
     },
     "PUMP_03": {
-        "display_name": "Fusion Generator B",
+        "display_name": "PUMP_03",
+        "subtitle":     "Hydraulic Pump",
         "asset_id":     "M03",
         "location":     "Bay B-1",
         "image":        "https://lh3.googleusercontent.com/aida-public/AB6AXuAO-E3K5Csx1DG790XnuvV3hoFCB9Cahya1uopkebZxnXc9nwEyfYZ8RLPtLPURLA_d2qFRkLn8nMshFcpu79PVA_8m34Yxp2o8DZ5jEqnt-X5DJxMZQm9tt9hc6HHEtP-QMHPizgBx0W0zDKyJ3KBNjBxcbn1DaJJfEnNBT7nIwxg2m0kjRl8YoP58011mnBVQaQTT3NNcn9_21Ie59NyTQPVbT7owYV-HQ8oLK-Zkpj4TGG6N_ut3xbwpNI2D1gDRCjwsRyF2qtmp",
     },
     "CONVEYOR_04": {
-        "display_name": "Atmospheric Scrubber",
+        "display_name": "CONVEYOR_04",
+        "subtitle":     "Belt Conveyor System",
         "asset_id":     "M04",
         "location":     "Bay C-1",
         "image":        "https://lh3.googleusercontent.com/aida-public/AB6AXuCBjBdjbVz2eS06iJnR_qeKuX_jgb5RaKicPGl3In8ci8K9GXW7DfrI6T1vXE2VWe2WR5xSVIQrphNpbJYUqnvkSCSFcCK8UCKdCwPlI7yc1UAQkhsuW3h0kOwckw3xZJ4dbozgc6oD6-N8dkAjm3IKbOUD7wqtmmdwnaWMG9jAOMwdOGXFBqEqyeayZMv66Hotp9SzV6XhWO8uS2EbEIbJSSR3a3KcvbMSyIOG2Xu4JCPAiBuOBqmLMrSS1ETXx6ftmpfYFcogianT",
@@ -54,13 +58,36 @@ MACHINE_META = {
 }
 
 # ── Thresholds ─────────────────────────────────────────────────────────────────
-Z_DEFAULT     = 3.0
-_THRESHOLD_OVERRIDE = {"CONVEYOR_04": 83.0, "CNC_02": 76.0, "PUMP_03": 58.0}
-_MAX_SLOPE    = {"temperature_C": 0.5, "vibration_mm_s": 0.05, "rpm": 2.0, "current_A": 0.1}
+Z_DEFAULT = 3.0
+
+# Z-score thresholds for the sigmoid risk formula (matches app.py _INITIAL_Z_THRESHOLD)
+_Z_THRESHOLD = {
+    "CNC_01":      2.7,   # lower — CNC_01 rarely faults, need early detection
+    "CNC_02":      2.8,   # slightly sensitive — faults frequently
+    "PUMP_03":     2.5,   # most sensitive — need to recover FNs
+    "CONVEYOR_04": 3.3,   # higher guard — belt dynamics inflate Z on normal ops
+}
+
+# Risk_pct thresholds for status determination (matches app.py overrides)
+_RISK_ALERT_THRESHOLD = {
+    "CNC_01":      55.0,
+    "CNC_02":      84.0,
+    "CONVEYOR_04": 93.0,
+    "PUMP_03":     60.0,
+}
+
+# Per-machine IF corroboration min Z (must match app.py _if_min_z_map)
+_IF_MIN_Z = {"CONVEYOR_04": 5.0, "CNC_02": 3.5, "PUMP_03": 2.0}
+
+_MAX_SLOPE = {"temperature_C": 0.5, "vibration_mm_s": 0.05, "rpm": 2.0, "current_A": 0.1}
+
+# Min consecutive above-threshold ticks before status changes to warning/critical
+_MIN_BREACH = {"CNC_02": 1, "CONVEYOR_04": 3, "CNC_01": 1, "PUMP_03": 1}
 
 # ── In-memory state ────────────────────────────────────────────────────────────
-_state:    dict  = {}
-_buffers:  dict  = {mid: deque(maxlen=BUFFER_SIZE) for mid in MACHINE_IDS}
+_state:         dict  = {}
+_buffers:       dict  = {mid: deque(maxlen=BUFFER_SIZE) for mid in MACHINE_IDS}
+_breach_counts: dict  = {mid: 0 for mid in MACHINE_IDS}
 _baselines:dict  = {}
 _models:   dict  = {}
 _alerts:   list  = []
@@ -92,6 +119,7 @@ def _load_assets():
         _state[mid] = {
             "id":             mid,
             "display_name":   MACHINE_META[mid]["display_name"],
+            "subtitle":       MACHINE_META[mid]["subtitle"],
             "asset_id":       MACHINE_META[mid]["asset_id"],
             "location":       MACHINE_META[mid]["location"],
             "image":          MACHINE_META[mid]["image"],
@@ -127,8 +155,8 @@ def _predict(machine_id: str, latest: dict) -> tuple[float, bool, float]:
         std  = max(float(b[s]["std"]), abs(mean) * 0.03, 1e-3)
         z_scores[s] = abs((val - mean) / std)
 
-    threshold = _THRESHOLD_OVERRIDE.get(machine_id, Z_DEFAULT)
-    max_z     = max(z_scores.values()) if z_scores else 0.0
+    z_thresh = _Z_THRESHOLD.get(machine_id, Z_DEFAULT)
+    max_z    = max(z_scores.values()) if z_scores else 0.0
 
     # IsolationForest
     if_anomaly = False
@@ -144,16 +172,22 @@ def _predict(machine_id: str, latest: dict) -> tuple[float, bool, float]:
         except Exception:
             pass
 
-    # Polyfit
+    # IF corroboration gate
+    if_min_z = _IF_MIN_Z.get(machine_id, 2.5 if machine_id in _RISK_ALERT_THRESHOLD else 0.0)
+    isolation_penalty = 0.3 if (if_anomaly and max_z >= if_min_z) else 0.0
+
+    # Polyfit — per-machine slope overrides matching app.py
+    _slope_override = {
+        "CONVEYOR_04": {"temperature_C": 0.8, "vibration_mm_s": 0.22, "rpm": 6.0, "current_A": 0.35},
+        "CNC_02":      {"temperature_C": 0.8, "vibration_mm_s": 0.10, "current_A": 0.18},
+    }
     buf = list(_buffers[machine_id])
     polyfit_score = 0.0
     if len(buf) >= 30 and machine_id in _baselines:
         buf30 = buf[-30:]
         x_arr = np.arange(30, dtype=float)
+        ms    = {**_MAX_SLOPE, **_slope_override.get(machine_id, {})}
         sevs  = []
-        ms    = {**_MAX_SLOPE}
-        if machine_id == "CONVEYOR_04":
-            ms.update({"vibration_mm_s": 0.12, "rpm": 4.0, "current_A": 0.2})
         for s in SENSORS:
             vals = [float(r.get(s, b[s]["mean"])) for r in buf30]
             try:
@@ -163,23 +197,20 @@ def _predict(machine_id: str, latest: dict) -> tuple[float, bool, float]:
                 sevs.append(0.0)
         polyfit_score = max(sevs)
 
-    isolation_penalty = 0.3 if if_anomaly else 0.0
-    trend_penalty     = (polyfit_score / 100.0) * 0.2
-    _if_min_z = 2.0 if machine_id in _THRESHOLD_OVERRIDE else 0.0
-    if not (if_anomaly and max_z >= _if_min_z):
-        isolation_penalty = 0.0
-
-    base_score = (max_z - threshold) / max(threshold, 1e-6)
-    raw        = base_score + isolation_penalty + trend_penalty
-    risk_pct   = round(max(0.0, min(100.0, _sigmoid(raw) * 100.0)), 2)
+    trend_penalty = (polyfit_score / 100.0) * 0.2
+    base_score    = (max_z - z_thresh) / max(z_thresh, 1e-6)
+    raw           = base_score + isolation_penalty + trend_penalty
+    risk_pct      = round(max(0.0, min(100.0, _sigmoid(raw) * 100.0)), 2)
     return risk_pct, if_anomaly, round(polyfit_score, 1)
 
 
-def _status_from_risk(risk_pct: float, server_status: str) -> str:
-    is_fault = server_status in ("warning", "fault")
-    if risk_pct >= 80 or (is_fault and risk_pct >= 60):
+def _status_from_risk(risk_pct: float, server_status: str, machine_id: str = "") -> str:
+    is_fault    = server_status in ("warning", "fault")
+    alert_thr   = _RISK_ALERT_THRESHOLD.get(machine_id, 65.0)
+    crit_thr    = min(alert_thr + 12.0, 97.0)
+    if risk_pct >= crit_thr or (is_fault and risk_pct >= alert_thr):
         return "critical"
-    if risk_pct >= 45 or is_fault:
+    if risk_pct >= alert_thr or is_fault:
         return "warning"
     return "healthy"
 
@@ -203,13 +234,14 @@ def _broadcast(payload: dict):
 
 # ── Per-machine SSE worker (background thread) ─────────────────────────────────
 def _stream_worker(machine_id: str):
-    import sseclient
+    import sseclient, requests as _req
     backoff = 1
     while True:
         try:
-            resp = httpx.get(
+            resp = _req.get(
                 f"{NODE_URL}/stream/{machine_id}",
                 headers={"Accept": "text/event-stream"},
+                stream=True,
                 timeout=None,
             )
             client  = sseclient.SSEClient(resp)
@@ -227,7 +259,18 @@ def _stream_worker(machine_id: str):
                     _buffers[machine_id].append(data)
 
                     risk_pct, if_anomaly, pf_score = _predict(machine_id, data)
-                    status = _status_from_risk(risk_pct, data.get("status", "running"))
+
+                    # Breach counter — require N consecutive above-threshold ticks
+                    alert_thr = _RISK_ALERT_THRESHOLD.get(machine_id, 65.0)
+                    if risk_pct >= alert_thr:
+                        _breach_counts[machine_id] += 1
+                    else:
+                        _breach_counts[machine_id] = 0
+                    breach_ok = _breach_counts[machine_id] >= _MIN_BREACH.get(machine_id, 1)
+
+                    # Only promote to warning/critical if breach count satisfied
+                    raw_status = _status_from_risk(risk_pct, data.get("status", "running"), machine_id)
+                    status = raw_status if (breach_ok or raw_status == "healthy") else "healthy"
 
                     _state[machine_id].update({
                         "temperature_C":  round(float(data.get("temperature_C",  _state[machine_id]["temperature_C"])),  2),

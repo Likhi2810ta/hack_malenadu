@@ -2,7 +2,7 @@ const TABS = ['Fleet Overview', 'Topology', 'Maintenance']
 
 export default function Navbar({ activeTab, setActiveTab, connected }) {
   return (
-    <header className="fixed top-0 right-0 left-64 h-16 flex items-center justify-between px-8 z-40 bg-slate-950/50 backdrop-blur-md">
+    <header className="fixed top-0 right-0 left-0 h-16 flex items-center justify-between px-8 z-40 bg-slate-950/80 backdrop-blur-md border-b border-white/5">
       <div className="flex items-center gap-6">
         <div className="flex items-center gap-3">
           <span className="text-xl font-black text-blue-100 tracking-tight font-headline">MONITOR_UI</span>

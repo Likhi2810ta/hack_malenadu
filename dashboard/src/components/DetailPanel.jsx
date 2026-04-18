@@ -113,18 +113,34 @@ export default function DetailPanel({ machine }) {
   const vibVal  = machine.vibration_mm_s?.toFixed(1)  ?? '--'
   const tempVal = machine.temperature_C?.toFixed(1)   ?? '--'
   const rpmVal  = machine.rpm ? Math.round(machine.rpm).toLocaleString() : '--'
+  const curVal  = machine.current_A?.toFixed(2) ?? '--'
+  const risk    = machine.risk_pct ?? 0
+
+  function riskColor(pct) {
+    if (pct >= 80) return '#ff3355'
+    if (pct >= 60) return '#f3632d'
+    if (pct >= 40) return '#ffcc00'
+    return '#2EC4B6'
+  }
+  function riskLabel(pct) {
+    if (pct >= 80) return 'CRITICAL'
+    if (pct >= 60) return 'HIGH RISK'
+    if (pct >= 40) return 'MODERATE'
+    if (pct >= 20) return 'ELEVATED'
+    return 'STABLE'
+  }
 
   return (
     <aside className="fixed top-16 right-0 bottom-0 w-[380px] bg-slate-900 shadow-2xl border-l border-white/10 glass-panel overflow-y-auto no-scrollbar z-30">
       <div className="p-6">
 
         {/* Header */}
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center justify-between mb-6">
           <div>
             <h3 className="text-lg font-headline font-bold text-blue-100">
-              Asset Detail: {machine.asset_id}
+              {machine.id}
             </h3>
-            <p className="text-xs text-slate-400 mt-0.5">{machine.display_name}</p>
+            <p className="text-xs text-slate-400 mt-0.5">{machine.subtitle || machine.display_name}</p>
           </div>
           <div className={`px-2 py-1 rounded font-label text-[10px] uppercase font-bold
             ${isBad
@@ -132,6 +148,54 @@ export default function DetailPanel({ machine }) {
               : 'bg-[#2EC4B6]/10 text-[#2EC4B6] border border-[#2EC4B6]/20'
             }`}>
             {status.toUpperCase()}
+          </div>
+        </div>
+
+        {/* Risk meter */}
+        <div className="mb-6">
+          <div className="flex justify-between items-center mb-1.5">
+            <span className="font-label text-[9px] uppercase tracking-widest text-slate-500">Risk Score</span>
+            <span className="font-headline font-bold text-sm" style={{ color: riskColor(risk) }}>
+              {risk.toFixed(1)}% — {riskLabel(risk)}
+            </span>
+          </div>
+          <div className="w-full h-1.5 bg-surface-container-highest rounded-full overflow-hidden">
+            <div
+              className="h-full rounded-full transition-all duration-700"
+              style={{ width: `${Math.min(risk, 100)}%`, background: riskColor(risk) }}
+            />
+          </div>
+        </div>
+
+        {/* Live sensor snapshot */}
+        <div className="grid grid-cols-2 gap-2 mb-6">
+          {[
+            { label: 'Temperature', val: `${tempVal}°C`, icon: 'thermostat' },
+            { label: 'Vibration',   val: `${vibVal} mm/s`, icon: 'vibration' },
+            { label: 'RPM',         val: rpmVal, icon: 'rotate_right' },
+            { label: 'Current',     val: `${curVal} A`, icon: 'bolt' },
+          ].map(({ label, val, icon }) => (
+            <div key={label} className="bg-surface-container-high rounded-lg px-3 py-2.5 flex items-center gap-2">
+              <span className="material-symbols-outlined text-slate-500" style={{ fontSize: 16 }}>{icon}</span>
+              <div>
+                <p className="font-label text-[9px] uppercase tracking-wider text-slate-500">{label}</p>
+                <p className={`font-headline font-bold text-sm ${isBad ? 'text-tertiary-container' : 'text-primary'}`}>{val}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* IsolationForest + Polyfit indicators */}
+        <div className="flex gap-2 mb-6">
+          <div className={`flex-1 px-3 py-2 rounded-lg border font-label text-[9px] uppercase tracking-wider text-center ${machine.if_anomaly ? 'bg-red-500/10 border-red-500/20 text-red-400' : 'bg-surface-container-high border-white/5 text-slate-500'}`}>
+            <span className="material-symbols-outlined block mx-auto mb-0.5" style={{ fontSize: 14 }}>
+              {machine.if_anomaly ? 'crisis_alert' : 'check_circle'}
+            </span>
+            IsoForest {machine.if_anomaly ? 'ANOMALY' : 'Normal'}
+          </div>
+          <div className={`flex-1 px-3 py-2 rounded-lg border font-label text-[9px] uppercase tracking-wider text-center ${(machine.polyfit_score ?? 0) > 30 ? 'bg-yellow-500/10 border-yellow-500/20 text-yellow-400' : 'bg-surface-container-high border-white/5 text-slate-500'}`}>
+            <span className="material-symbols-outlined block mx-auto mb-0.5" style={{ fontSize: 14 }}>trending_up</span>
+            Trend {(machine.polyfit_score ?? 0).toFixed(0)}%
           </div>
         </div>
 
