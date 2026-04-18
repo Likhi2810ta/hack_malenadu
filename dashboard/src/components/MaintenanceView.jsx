@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 
-const API = 'http://localhost:8000'
-
+const API_BASE =
+  import.meta.env.VITE_API_URL || "http://localhost:8000";
 function riskColor(pct) {
   if (pct >= 80) return { bg: 'bg-red-500/10', border: 'border-red-500/20', text: 'text-red-400', dot: '#ff3355' }
   if (pct >= 60) return { bg: 'bg-tertiary-container/10', border: 'border-tertiary-container/20', text: 'text-tertiary-container', dot: '#f3632d' }
@@ -26,7 +26,7 @@ export default function MaintenanceView({ machines }) {
   const [alerts, setAlerts]   = useState([])
 
   useEffect(() => {
-    fetch(`${API}/api/alerts`).then(r => r.json()).then(setAlerts).catch(() => {})
+    fetch(`${API_BASE}/api/alerts`).then(r => r.json()).then(setAlerts).catch(() => {})
   }, [])
 
   const queue = machines.filter(m => m.status !== 'healthy')
@@ -35,13 +35,13 @@ export default function MaintenanceView({ machines }) {
     : [...queue].sort((a, b) => a.risk_pct - b.risk_pct) // SJF = lowest risk first
 
   async function handleConfirm(id) {
-    await fetch(`${API}/api/machines/${id}/confirm`, { method: 'POST' })
+    await fetch(`${API_BASE}/api/machines/${id}/confirm`, { method: 'POST' })
     setActions(p => ({ ...p, [id]: 'confirmed' }))
-    const r = await fetch(`${API}/api/alerts`)
+    const r = await fetch(`${API_BASE}/api/alerts`)
     setAlerts(await r.json())
   }
   async function handleDismiss(id) {
-    await fetch(`${API}/api/machines/${id}/dismiss`, { method: 'POST' })
+    await fetch(`${API_BASE}/api/machines/${id}/dismiss`, { method: 'POST' })
     setActions(p => ({ ...p, [id]: 'dismissed' }))
   }
 

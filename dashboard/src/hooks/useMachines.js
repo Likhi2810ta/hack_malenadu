@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 
-const API = 'http://localhost:8000'
+const API_BASE =
+  import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 const ORDERED = ['CNC_01', 'CNC_02', 'PUMP_03', 'CONVEYOR_04']
 
@@ -42,14 +43,14 @@ export function useMachines() {
 }
 
 export async function fetchHistory(machineId) {
-  const res = await fetch(`${API}/api/machines/${machineId}/history?n=30`)
+  const res = await fetch(`${API_BASE}/api/machines/${machineId}/history?n=30`)
   return res.json()
 }
 
 export async function confirmMaintenance(machineId) {
-  await fetch(`${API}/api/machines/${machineId}/confirm`, { method: 'POST' })
+  await fetch(`$API_BASE}/api/machines/${machineId}/confirm`, { method: 'POST' })
 }
 
 export async function dismissAlarm(machineId) {
-  await fetch(`${API}/api/machines/${machineId}/dismiss`, { method: 'POST' })
+  await fetch(`${API_BASE}/api/machines/${machineId}/dismiss`, { method: 'POST' })
 }
